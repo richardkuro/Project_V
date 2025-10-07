@@ -1,0 +1,5 @@
+{
+  "name": "Project_V",
+  "description": "An interactive 3D spatial audio mixer built with React, Three.js, and the Web Audio API. Upload audio tracks, position them in a 3D or 2D space by dragging spheres, and listen to the spatially mixed result. Features a timeline with waveforms, playback controls, and the ability to export the final mix as a WAV file.",
+  "requestFramePermissions": []
+}
