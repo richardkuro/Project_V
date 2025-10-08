@@ -12,69 +12,86 @@ interface SceneProps {
 
 const Scene: React.FC<SceneProps> = ({ soundSources, is3DMode, onSourceMove }) => {
     const mountRef = useRef<HTMLDivElement>(null);
-    const sceneRef = useRef<THREE.Scene>(new THREE.Scene());
+
+    // Refs for Three.js objects that persist across renders
+    const sceneRef = useRef<THREE.Scene | null>(null);
     const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
     const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
-    const labelRendererRef = useRef<CSS2DRenderer | null>(null);
     const controlsRef = useRef<OrbitControls | null>(null);
     const soundSourceMeshes = useRef(new Map<string, THREE.Mesh>()).current;
+
+    // Use refs for props/state used in event listeners to avoid stale closures
+    const is3DModeRef = useRef(is3DMode);
+    useEffect(() => { is3DModeRef.current = is3DMode; }, [is3DMode]);
     
-    // Effect for initializing the scene, camera, renderer, etc.
+    const onSourceMoveRef = useRef(onSourceMove);
+    useEffect(() => { onSourceMoveRef.current = onSourceMove; }, [onSourceMove]);
+
+    // Effect for initializing the scene, camera, renderer, etc. Runs only ONCE.
     useEffect(() => {
         const mount = mountRef.current;
-        if (!mount) return;
+        if (!mount || rendererRef.current) return; // Exit if not mounted or already initialized
 
-        // Basic setup
-        cameraRef.current = new THREE.PerspectiveCamera(75, mount.clientWidth / mount.clientHeight, 0.1, 1000);
-        cameraRef.current.position.set(0, 5, 15);
-        
-        rendererRef.current = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-        rendererRef.current.setSize(mount.clientWidth, mount.clientHeight);
-        rendererRef.current.setPixelRatio(window.devicePixelRatio);
-        mount.appendChild(rendererRef.current.domElement);
-        
-        labelRendererRef.current = new CSS2DRenderer();
-        labelRendererRef.current.setSize(mount.clientWidth, mount.clientHeight);
-        labelRendererRef.current.domElement.style.position = 'absolute';
-        labelRendererRef.current.domElement.style.top = '0px';
-        labelRendererRef.current.domElement.style.pointerEvents = 'none';
-        mount.appendChild(labelRendererRef.current.domElement);
+        const scene = new THREE.Scene();
+        sceneRef.current = scene;
 
-        controlsRef.current = new OrbitControls(cameraRef.current, rendererRef.current.domElement);
-        controlsRef.current.enableDamping = true;
-        controlsRef.current.dampingFactor = 0.05;
-        controlsRef.current.minDistance = 5;
-        controlsRef.current.maxDistance = 50;
-        controlsRef.current.enablePan = false;
+        const camera = new THREE.PerspectiveCamera(75, mount.clientWidth / mount.clientHeight, 0.1, 1000);
+        camera.position.set(0, 5, 15);
+        cameraRef.current = camera;
         
-        // Lighting
-        sceneRef.current.add(new THREE.AmbientLight(0xffffff, 0.5));
-        const directionalLight = new THREE.DirectionalLight(0xccfbf1, 1.5); // A cyan-tinted light
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(mount.clientWidth, mount.clientHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        mount.appendChild(renderer.domElement);
+        rendererRef.current = renderer;
+        
+        const labelRenderer = new CSS2DRenderer();
+        labelRenderer.setSize(mount.clientWidth, mount.clientHeight);
+        labelRenderer.domElement.style.position = 'absolute';
+        labelRenderer.domElement.style.top = '0px';
+        labelRenderer.domElement.style.pointerEvents = 'none';
+        mount.appendChild(labelRenderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.minDistance = 5;
+        controls.maxDistance = 50;
+        controls.enablePan = false;
+        controlsRef.current = controls;
+        
+        scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+        const directionalLight = new THREE.DirectionalLight(0xccfbf1, 1.5);
         directionalLight.position.set(5, 10, 7.5);
-        sceneRef.current.add(directionalLight);
+        scene.add(directionalLight);
 
-        // Stage
-        const stageGeom3D = new THREE.SphereGeometry(10, 32, 32);
-        const stageMat3D = new THREE.MeshStandardMaterial({ color: 0x334155, transparent: true, opacity: 0.1, wireframe: true });
-        const stageSphere3D = new THREE.Mesh(stageGeom3D, stageMat3D);
+        const stageSphere3D = new THREE.Mesh(
+            new THREE.SphereGeometry(10, 32, 32),
+            new THREE.MeshStandardMaterial({ color: 0x334155, transparent: true, opacity: 0.1, wireframe: true })
+        );
         stageSphere3D.name = 'stageSphere3D';
-        sceneRef.current.add(stageSphere3D);
+        scene.add(stageSphere3D);
 
-        const stageGeom2D = new THREE.RingGeometry(9.9, 10, 64);
-        const stageMat2D = new THREE.MeshBasicMaterial({ color: 0x334155, side: THREE.DoubleSide });
-        const stageCircle2D = new THREE.Mesh(stageGeom2D, stageMat2D);
+        const stageCircle2D = new THREE.Mesh(
+            new THREE.RingGeometry(9.9, 10, 64),
+            new THREE.MeshBasicMaterial({ color: 0x334155, side: THREE.DoubleSide })
+        );
         stageCircle2D.name = 'stageCircle2D';
         stageCircle2D.rotation.x = -Math.PI / 2;
         stageCircle2D.visible = false;
-        sceneRef.current.add(stageCircle2D);
+        scene.add(stageCircle2D);
 
-        // Listener representation
-        const listenerGeometry = new THREE.BoxGeometry(0.5, 0.8, 0.5);
-        const listenerMaterial = new THREE.MeshStandardMaterial({ color: 0xa5f3fc, emissive: 0x22d3ee, emissiveIntensity: 0.5 });
-        sceneRef.current.add(new THREE.Mesh(listenerGeometry, listenerMaterial));
+        const listenerMesh = new THREE.Mesh(
+            new THREE.BoxGeometry(0.5, 0.8, 0.5),
+            new THREE.MeshStandardMaterial({ color: 0xa5f3fc, emissive: 0x22d3ee, emissiveIntensity: 0.5 })
+        );
+        scene.add(listenerMesh);
 
-        // Directional markers
-        const markerPositions = { 'Front': new THREE.Vector3(0, 0, -11), 'Back': new THREE.Vector3(0, 0, 11), 'Left': new THREE.Vector3(-11, 0, 0), 'Right': new THREE.Vector3(11, 0, 0) };
+        const markerPositions = { 
+            'Front': new THREE.Vector3(0, 0, -11), 'Back': new THREE.Vector3(0, 0, 11), 
+            'Left': new THREE.Vector3(-11, 0, 0), 'Right': new THREE.Vector3(11, 0, 0),
+            'Top': new THREE.Vector3(0, 11, 0), 'Bottom': new THREE.Vector3(0, -11, 0)
+        };
         for (const [name, position] of Object.entries(markerPositions)) {
             const div = document.createElement('div');
             div.className = 'marker-label text-cyan-300 text-sm font-semibold pointer-events-none text-glow';
@@ -82,43 +99,74 @@ const Scene: React.FC<SceneProps> = ({ soundSources, is3DMode, onSourceMove }) =
             const label = new CSS2DObject(div);
             label.position.copy(position);
             label.name = `marker-${name}`;
-            sceneRef.current.add(label);
+            scene.add(label);
         }
 
-        // Animation loop
+        let animationFrameId: number;
+        let selectedObjectForScroll: THREE.Mesh | null = null;
+        let scrollTargetDistance: number | null = null;
+
         const animate = () => {
-            requestAnimationFrame(animate);
-            controlsRef.current?.update();
-            rendererRef.current?.render(sceneRef.current, cameraRef.current!);
-            labelRendererRef.current?.render(sceneRef.current, cameraRef.current!);
+            animationFrameId = requestAnimationFrame(animate);
+            controls.update();
+
+            // Smooth scrolling logic
+            if (selectedObjectForScroll && scrollTargetDistance !== null) {
+                const currentLength = selectedObjectForScroll.position.length();
+                if (Math.abs(currentLength - scrollTargetDistance) > 0.01) {
+                    const newLength = THREE.MathUtils.lerp(currentLength, scrollTargetDistance, 0.1);
+                    selectedObjectForScroll.position.setLength(newLength);
+                    onSourceMoveRef.current(selectedObjectForScroll.userData.id, selectedObjectForScroll.position);
+                }
+            }
+
+            renderer.render(scene, camera);
+            labelRenderer.render(scene, camera);
         };
         animate();
 
-        // Interaction setup
         const raycaster = new THREE.Raycaster();
         const mouse = new THREE.Vector2();
-        let selectedObject: THREE.Mesh | null = null;
+        let selectedObjectForDrag: THREE.Mesh | null = null;
         let hoveredObject: THREE.Mesh | null = null;
         let hoverTimeout: number | null = null;
 
+        const dragPlane = new THREE.Plane();
+        const intersectionPoint = new THREE.Vector3();
+        const offset = new THREE.Vector3();
+
         const onPointerDown = (event: PointerEvent) => {
-             // Clear any pending hover effects immediately on click
             if (hoverTimeout) clearTimeout(hoverTimeout);
-            if (hoveredObject && hoveredObject.userData.label) {
-                hoveredObject.userData.label.visible = false;
-            }
+            if (hoveredObject && hoveredObject.userData.label) hoveredObject.userData.label.visible = false;
             hoveredObject = null;
 
-            if (event.target !== rendererRef.current?.domElement) return;
+            if (event.target !== renderer.domElement) return;
             const rect = mount.getBoundingClientRect();
             mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
             mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-            raycaster.setFromCamera(mouse, cameraRef.current!);
+            raycaster.setFromCamera(mouse, camera);
             const intersects = raycaster.intersectObjects(Array.from(soundSourceMeshes.values()));
             if (intersects.length > 0) {
-                selectedObject = intersects[0].object as THREE.Mesh;
+                const selected = intersects[0].object as THREE.Mesh;
+                selectedObjectForDrag = selected;
+                selectedObjectForScroll = selected; // Link for scrolling
+                
                 mount.style.cursor = 'grabbing';
-                if (controlsRef.current) controlsRef.current.enabled = false;
+                controls.enabled = false;
+                
+                if (is3DModeRef.current) {
+                    const cameraDirection = new THREE.Vector3();
+                    camera.getWorldDirection(cameraDirection);
+                    dragPlane.setFromNormalAndCoplanarPoint(cameraDirection, selected.position);
+                } else {
+                    dragPlane.set(new THREE.Vector3(0, 1, 0), 0);
+                }
+
+                if (raycaster.ray.intersectPlane(dragPlane, intersectionPoint)) {
+                    offset.copy(intersectionPoint).sub(selected.position);
+                }
+                
+                scrollTargetDistance = selected.position.length(); // Initialize for scrolling
             }
         };
 
@@ -126,101 +174,125 @@ const Scene: React.FC<SceneProps> = ({ soundSources, is3DMode, onSourceMove }) =
             const rect = mount.getBoundingClientRect();
             mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
             mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-            raycaster.setFromCamera(mouse, cameraRef.current!);
+            raycaster.setFromCamera(mouse, camera);
 
-            if (selectedObject) { // Dragging logic
+            if (selectedObjectForDrag) {
                 event.preventDefault();
-                const intersectionPoint = new THREE.Vector3();
-                if (is3DMode) {
-                    raycaster.ray.intersectSphere(new THREE.Sphere(new THREE.Vector3(), 10), intersectionPoint);
-                } else {
-                    raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), intersectionPoint);
-                    if (intersectionPoint.length() > 10) intersectionPoint.normalize().multiplyScalar(10);
+                if (raycaster.ray.intersectPlane(dragPlane, intersectionPoint)) {
+                    const newPosition = intersectionPoint.clone().sub(offset);
+
+                    if (newPosition.length() > 10) {
+                        newPosition.setLength(10);
+                    }
+                    if (!is3DModeRef.current) {
+                        newPosition.y = 0;
+                    }
+                    
+                    selectedObjectForDrag.position.copy(newPosition);
+                    scrollTargetDistance = newPosition.length(); // Update scroll target while dragging
+                    onSourceMoveRef.current(selectedObjectForDrag.userData.id, selectedObjectForDrag.position);
                 }
-                selectedObject.position.copy(intersectionPoint);
-                onSourceMove(selectedObject.userData.id, selectedObject.position);
-            } else { // Hover logic
+            } else {
                 const intersects = raycaster.intersectObjects(Array.from(soundSourceMeshes.values()));
                 const newHoveredObject = intersects.length > 0 ? (intersects[0].object as THREE.Mesh) : null;
-
                 if (newHoveredObject !== hoveredObject) {
                     if (hoverTimeout) clearTimeout(hoverTimeout);
-                    
-                    if (hoveredObject && hoveredObject.userData.label) {
-                        hoveredObject.userData.label.visible = false;
-                    }
-
+                    if (hoveredObject && hoveredObject.userData.label) hoveredObject.userData.label.visible = false;
                     hoveredObject = newHoveredObject;
-
                     if (hoveredObject) {
                         hoverTimeout = window.setTimeout(() => {
-                            if (hoveredObject && hoveredObject.userData.label) {
-                                hoveredObject.userData.label.visible = true;
-                            }
+                            if (hoveredObject && hoveredObject.userData.label) hoveredObject.userData.label.visible = true;
                         }, 500);
                     }
                 }
             }
         };
 
-        const onPointerUp = () => {
-            if (selectedObject) {
-                selectedObject = null;
+        const onWindowPointerUp = () => {
+            if (selectedObjectForDrag) {
+                selectedObjectForDrag = null;
                 mount.style.cursor = 'grab';
-                if (controlsRef.current) controlsRef.current.enabled = true;
+                controls.enabled = true;
             }
+            selectedObjectForScroll = null;
+            scrollTargetDistance = null;
+        };
+
+        const onWheel = (event: WheelEvent) => {
+            if (!is3DModeRef.current || !selectedObjectForScroll) return;
+            
+            event.preventDefault();
+
+            const scrollSensitivity = 0.005;
+            const scrollAmount = event.deltaY * scrollSensitivity;
+            
+            if (scrollTargetDistance === null) {
+                scrollTargetDistance = selectedObjectForScroll.position.length();
+            }
+
+            scrollTargetDistance -= scrollAmount;
+            scrollTargetDistance = THREE.MathUtils.clamp(scrollTargetDistance, 0.1, 10);
         };
 
         mount.addEventListener('pointerdown', onPointerDown);
         window.addEventListener('pointermove', onPointerMove);
-        window.addEventListener('pointerup', onPointerUp);
+        window.addEventListener('pointerup', onWindowPointerUp);
+        mount.addEventListener('wheel', onWheel, { passive: false });
         
         const handleResize = () => {
-             if (!cameraRef.current || !rendererRef.current || !labelRendererRef.current || !mount) return;
-             cameraRef.current.aspect = mount.clientWidth / mount.clientHeight;
-             cameraRef.current.updateProjectionMatrix();
-             rendererRef.current.setSize(mount.clientWidth, mount.clientHeight);
-             labelRendererRef.current.setSize(mount.clientWidth, mount.clientHeight);
+             camera.aspect = mount.clientWidth / mount.clientHeight;
+             camera.updateProjectionMatrix();
+             renderer.setSize(mount.clientWidth, mount.clientHeight);
+             labelRenderer.setSize(mount.clientWidth, mount.clientHeight);
         }
         window.addEventListener('resize', handleResize);
 
-        // Cleanup
         return () => {
+            cancelAnimationFrame(animationFrameId);
             window.removeEventListener('resize', handleResize);
             mount.removeEventListener('pointerdown', onPointerDown);
             window.removeEventListener('pointermove', onPointerMove);
-            window.removeEventListener('pointerup', onPointerUp);
-            if (rendererRef.current?.domElement && mount.contains(rendererRef.current.domElement)) {
-                mount.removeChild(rendererRef.current.domElement);
-            }
-            if (labelRendererRef.current?.domElement && mount.contains(labelRendererRef.current.domElement)) {
-                mount.removeChild(labelRendererRef.current.domElement);
-            }
+            window.removeEventListener('pointerup', onWindowPointerUp);
+            mount.removeEventListener('wheel', onWheel);
+
+            scene.traverse(object => {
+                if (!(object instanceof THREE.Mesh)) return;
+                object.geometry.dispose();
+                const material = object.material as THREE.Material | THREE.Material[];
+                if (Array.isArray(material)) {
+                    material.forEach(m => m.dispose());
+                } else {
+                    material.dispose();
+                }
+            });
+
+            controls.dispose();
+            renderer.dispose();
+            if (renderer.domElement.parentElement === mount) mount.removeChild(renderer.domElement);
+            if (labelRenderer.domElement.parentElement === mount) mount.removeChild(labelRenderer.domElement);
+            rendererRef.current = null;
         };
-    }, [onSourceMove, is3DMode]);
+    }, []); // Empty dependency array ensures this runs only once.
 
     // Effect for handling sound source mesh updates
     useEffect(() => {
+        if (!sceneRef.current) return;
+        const scene = sceneRef.current;
         const currentIds = new Set(soundSources.map(s => s.id));
         
-        // Remove old meshes
         soundSourceMeshes.forEach((mesh, id) => {
             if (!currentIds.has(id)) {
-                sceneRef.current.remove(mesh);
+                if (mesh.userData.label) mesh.remove(mesh.userData.label);
+                scene.remove(mesh);
                 soundSourceMeshes.delete(id);
             }
         });
 
-        // Add new meshes
         soundSources.forEach(source => {
             if (!soundSourceMeshes.has(source.id)) {
                 const mesh = new THREE.Mesh(
                     new THREE.SphereGeometry(0.5, 32, 16),
-                    new THREE.MeshStandardMaterial({ 
-                        color: source.color,
-                        emissive: source.color, // Make the spheres glow
-                        emissiveIntensity: 0.5
-                    })
+                    new THREE.MeshStandardMaterial({ color: source.color, emissive: source.color, emissiveIntensity: 0.5 })
                 );
                 mesh.position.setFromSphericalCoords(10, Math.random() * Math.PI, Math.random() * 2 * Math.PI);
                 if (!is3DMode) mesh.position.y = 0;
@@ -229,14 +301,14 @@ const Scene: React.FC<SceneProps> = ({ soundSources, is3DMode, onSourceMove }) =
                 labelDiv.className = 'text-cyan-200 p-1 px-2 bg-slate-950 bg-opacity-70 rounded text-xs pointer-events-none transform -translate-x-1/2 translate-y-5 text-glow';
                 labelDiv.textContent = source.name.length > 15 ? `${source.name.substring(0, 12)}...` : source.name;
                 const label = new CSS2DObject(labelDiv);
-                label.visible = false; // Hide label by default
+                label.visible = false;
                 mesh.add(label);
                 
                 mesh.userData.id = source.id;
-                mesh.userData.label = label; // Store reference for hover logic
+                mesh.userData.label = label;
                 onSourceMove(source.id, mesh.position);
                 
-                sceneRef.current.add(mesh);
+                scene.add(mesh);
                 soundSourceMeshes.set(source.id, mesh);
             }
         });
@@ -244,37 +316,44 @@ const Scene: React.FC<SceneProps> = ({ soundSources, is3DMode, onSourceMove }) =
 
     // Effect for toggling 2D/3D mode
     useEffect(() => {
-        const stageSphere3D = sceneRef.current.getObjectByName('stageSphere3D');
-        const stageCircle2D = sceneRef.current.getObjectByName('stageCircle2D');
-        const frontMarker = sceneRef.current.getObjectByName('marker-Front');
-        const backMarker = sceneRef.current.getObjectByName('marker-Back');
+        const scene = sceneRef.current;
+        const camera = cameraRef.current;
+        const controls = controlsRef.current;
+        if (!scene || !camera || !controls) return;
 
-        if (stageSphere3D && stageCircle2D && cameraRef.current && controlsRef.current && frontMarker && backMarker) {
-            // Consistently define Front as -Z and Back as +Z
-            const frontPos = new THREE.Vector3(0, 0, -11);
-            const backPos = new THREE.Vector3(0, 0, 11);
-            
-            frontMarker.position.copy(frontPos);
-            backMarker.position.copy(backPos);
+        const stageSphere3D = scene.getObjectByName('stageSphere3D');
+        const stageCircle2D = scene.getObjectByName('stageCircle2D');
+        const topMarker = scene.getObjectByName('marker-Top');
+        const bottomMarker = scene.getObjectByName('marker-Bottom');
 
+        if (stageSphere3D && stageCircle2D) {
             if (is3DMode) {
                 stageSphere3D.visible = true;
                 stageCircle2D.visible = false;
-                controlsRef.current.enableRotate = true;
-                cameraRef.current.position.set(0, 5, 15);
-                controlsRef.current.target.set(0, 0, 0);
+                if(topMarker) topMarker.visible = true;
+                if(bottomMarker) bottomMarker.visible = true;
+                controls.enableRotate = true;
+                camera.position.set(0, 5, 15);
+                controls.target.set(0, 0, 0);
             } else {
                 stageSphere3D.visible = false;
                 stageCircle2D.visible = true;
-                controlsRef.current.enableRotate = false;
-                cameraRef.current.position.set(0, 20, 0.01);
-                controlsRef.current.target.set(0, 0, 0);
+                if(topMarker) topMarker.visible = false;
+                if(bottomMarker) bottomMarker.visible = false;
+                controls.enableRotate = false;
+                camera.position.set(0, 20, 0.01);
+                controls.target.set(0, 0, 0);
                 soundSourceMeshes.forEach(mesh => {
-                    mesh.position.y = 0;
-                    onSourceMove(mesh.userData.id, mesh.position);
+                    if (mesh.position.y !== 0) {
+                        const newPosition = mesh.position.clone();
+                        newPosition.y = 0;
+                        if (newPosition.length() > 10) newPosition.normalize().multiplyScalar(10);
+                        mesh.position.copy(newPosition);
+                        onSourceMove(mesh.userData.id, mesh.position);
+                    }
                 });
             }
-            controlsRef.current.update();
+            controls.update();
         }
     }, [is3DMode, onSourceMove, soundSourceMeshes]);
 

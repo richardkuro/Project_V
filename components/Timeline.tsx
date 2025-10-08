@@ -47,6 +47,7 @@ const Timeline: React.FC<TimelineProps> = ({
 }) => {
     const timelineWrapperRef = useRef<HTMLDivElement>(null);
     const timelineContainerRef = useRef<HTMLDivElement>(null);
+    const playheadRef = useRef<HTMLDivElement>(null);
     const [isSeeking, setIsSeeking] = useState(false);
     const [isMinimized, setIsMinimized] = useState(false);
 
@@ -57,8 +58,22 @@ const Timeline: React.FC<TimelineProps> = ({
         
         const containerBounds = timelineContainerRef.current.getBoundingClientRect();
         const scrollLeft = timelineContainerRef.current.scrollLeft;
-        const posInContainer = event.clientX - containerBounds.left;
-        const clickX = posInContainer + scrollLeft;
+        
+        const clickXInView = event.clientX - containerBounds.left;
+
+        // Determine click position relative to the start of the full timeline wrapper
+        let clickX;
+        if (playheadRef.current && playheadRef.current.style.left.endsWith('px')) {
+            const playheadLeft = parseFloat(playheadRef.current.style.left);
+            // If playhead is not centered, click is relative to view start
+            if (playheadLeft < (containerBounds.width / 2)) {
+                clickX = clickXInView;
+            } else { // otherwise it's relative to the scrolled content
+                clickX = clickXInView + scrollLeft;
+            }
+        } else { // Fallback for initial state
+            clickX = clickXInView + scrollLeft;
+        }
 
         const waveformAreaWidth = timelineWidth;
         if (waveformAreaWidth <= 0) return;
@@ -92,54 +107,77 @@ const Timeline: React.FC<TimelineProps> = ({
             window.removeEventListener('pointerup', handlePointerUp);
         };
     }, [isSeeking, handleSeek]);
+    
+    useEffect(() => {
+        if (timelineContainerRef.current && playheadRef.current && duration > 0) {
+            const container = timelineContainerRef.current;
+            const viewWidth = container.clientWidth;
+            const halfViewWidth = viewWidth / 2;
+            
+            const currentTimePosition = WAVEFORM_START_OFFSET_PX + (currentTime * zoomLevel);
 
-    let playheadPositionPercent = 0;
-    if (duration > 0 && timelineWidth > 0) {
-        const waveformAreaWidth = timelineWidth;
-        const playheadOffsetInWaveform = (currentTime / duration) * waveformAreaWidth;
-        const playheadAbsolutePosition = WAVEFORM_START_OFFSET_PX + playheadOffsetInWaveform;
-        playheadPositionPercent = (playheadAbsolutePosition / (timelineWidth + WAVEFORM_START_OFFSET_PX)) * 100;
-    }
+            let targetScrollLeft;
+            let playheadLeft;
+
+            if (currentTimePosition < halfViewWidth) {
+                targetScrollLeft = 0;
+                playheadLeft = currentTimePosition;
+            } else {
+                targetScrollLeft = currentTimePosition - halfViewWidth;
+                playheadLeft = halfViewWidth;
+            }
+
+            if (container.scrollLeft !== targetScrollLeft) {
+                container.scrollLeft = targetScrollLeft;
+            }
+            
+            playheadRef.current.style.left = `${playheadLeft}px`;
+        }
+    }, [currentTime, duration, zoomLevel]);
 
     return (
         <div className="flex-shrink-0 flex flex-col">
-            <div 
-                ref={timelineContainerRef} 
-                className={`w-full bg-slate-900/80 backdrop-blur-md border-t border-slate-700 overflow-x-auto overflow-y-auto transition-all duration-300 ease-in-out ${isMinimized ? 'max-h-0 !p-0 !border-t-0 opacity-0' : 'max-h-[40vh] p-2 opacity-100'}`}
-            >
+            <div className="relative">
                 <div 
-                    ref={timelineWrapperRef} 
-                    className="relative cursor-pointer space-y-1" 
-                    style={{ width: `${timelineWidth + WAVEFORM_START_OFFSET_PX}px` }}
-                    onPointerDown={handlePointerDown}
+                    ref={timelineContainerRef} 
+                    className={`w-full bg-slate-900/80 backdrop-blur-md border-t border-slate-700 overflow-x-auto overflow-y-auto transition-all duration-300 ease-in-out ${isMinimized ? 'max-h-0 !p-0 !border-t-0 opacity-0' : 'max-h-[40vh] p-2 opacity-100'}`}
                 >
-                    {soundSources.map(source => (
-                        <div key={source.id} className="flex items-center gap-2">
-                             <div className="w-32 p-2 bg-slate-800 rounded-md flex-shrink-0 pointer-events-auto">
-                                <div className="text-xs font-semibold truncate text-slate-200">{source.name}</div>
-                                <input 
-                                    type="range" min="0" max="1.5" step="0.01" defaultValue="1"
-                                    className="w-full h-2 mt-1 bg-slate-600 rounded-lg appearance-none cursor-pointer"
-                                    onChange={(e) => onVolumeChange(source.id, parseFloat(e.target.value))}
-                                />
+                    <div 
+                        ref={timelineWrapperRef} 
+                        className="relative cursor-pointer space-y-1" 
+                        style={{ width: `${timelineWidth + WAVEFORM_START_OFFSET_PX}px` }}
+                        onPointerDown={handlePointerDown}
+                    >
+                        {soundSources.map(source => (
+                            <div key={source.id} className="flex items-center gap-2">
+                                <div className="w-32 p-2 bg-slate-800 rounded-md flex-shrink-0 pointer-events-auto">
+                                    <div className="text-xs font-semibold truncate text-slate-200">{source.name}</div>
+                                    <input 
+                                        type="range" min="0" max="1.5" step="0.01" defaultValue="1"
+                                        className="w-full h-2 mt-1 bg-slate-600 rounded-lg appearance-none cursor-pointer"
+                                        onChange={(e) => onVolumeChange(source.id, parseFloat(e.target.value))}
+                                    />
+                                </div>
+                                <div className="waveform-container relative w-full h-[48px]" style={{width: `${timelineWidth}px`}}>
+                                    <WaveformCanvas buffer={source.buffer} color={source.color} />
+                                </div>
                             </div>
-                            <div className="waveform-container relative w-full h-[48px]" style={{width: `${timelineWidth}px`}}>
-                                <WaveformCanvas buffer={source.buffer} color={source.color} />
-                            </div>
-                        </div>
-                    ))}
-
-                    {duration > 0 && (
-                        <div 
-                            className="absolute left-0 top-0 w-0.5 h-full bg-cyan-400 pointer-events-none z-10"
-                            style={{ 
-                                left: `${playheadPositionPercent}%`, 
-                                boxShadow: '0 0 8px #22d3ee' 
-                            }}
-                        ></div>
-                    )}
+                        ))}
+                    </div>
                 </div>
+
+                {duration > 0 && !isMinimized && (
+                    <div 
+                        ref={playheadRef}
+                        className="absolute top-0 w-0.5 h-full bg-cyan-400 pointer-events-none z-10"
+                        style={{ 
+                            boxShadow: '0 0 8px #22d3ee',
+                            transform: 'translateX(-50%)' 
+                        }}
+                    ></div>
+                )}
             </div>
+
             <div className="bg-slate-950 p-2 flex items-center justify-between relative border-t border-slate-700 h-14">
                 <div className="flex items-center gap-4">
                     <button onClick={onPlayPause} disabled={!isAudioLoaded} className="flex items-center justify-center p-2 w-10 h-10 rounded-full transition-all duration-200 disabled:text-slate-600 disabled:bg-slate-800 text-white bg-emerald-600 hover:bg-emerald-700 disabled:shadow-none shadow-[0_0_10px_rgba(16,185,129,0.5)]">
