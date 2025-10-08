@@ -103,96 +103,99 @@ const Scene: React.FC<SceneProps> = ({ soundSources, is3DMode, onSourceMove }) =
         }
 
         let animationFrameId: number;
-        let selectedObjectForScroll: THREE.Mesh | null = null;
-        let scrollTargetDistance: number | null = null;
 
-        const animate = () => {
-            animationFrameId = requestAnimationFrame(animate);
-            controls.update();
-
-            // Smooth scrolling logic
-            if (selectedObjectForScroll && scrollTargetDistance !== null) {
-                const currentLength = selectedObjectForScroll.position.length();
-                if (Math.abs(currentLength - scrollTargetDistance) > 0.01) {
-                    const newLength = THREE.MathUtils.lerp(currentLength, scrollTargetDistance, 0.1);
-                    selectedObjectForScroll.position.setLength(newLength);
-                    onSourceMoveRef.current(selectedObjectForScroll.userData.id, selectedObjectForScroll.position);
-                }
-            }
-
-            renderer.render(scene, camera);
-            labelRenderer.render(scene, camera);
-        };
-        animate();
-
+        // --- INTERACTION STATE ---
         const raycaster = new THREE.Raycaster();
         const mouse = new THREE.Vector2();
-        let selectedObjectForDrag: THREE.Mesh | null = null;
+        
+        let selectedObject: THREE.Mesh | null = null;
         let hoveredObject: THREE.Mesh | null = null;
         let hoverTimeout: number | null = null;
+        
+        let isDragging = false;
+        const pointerDownCoords = new THREE.Vector2();
+        const DRAG_THRESHOLD_SQUARED = 5 * 5; // 5px threshold, squared to avoid sqrt
 
         const dragPlane = new THREE.Plane();
         const intersectionPoint = new THREE.Vector3();
         const offset = new THREE.Vector3();
-
+        
+        const animate = () => {
+            animationFrameId = requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+            labelRenderer.render(scene, camera);
+        };
+        animate();
+        
         const onPointerDown = (event: PointerEvent) => {
             if (hoverTimeout) clearTimeout(hoverTimeout);
             if (hoveredObject && hoveredObject.userData.label) hoveredObject.userData.label.visible = false;
             hoveredObject = null;
 
-            if (event.target !== renderer.domElement) return;
-            const rect = mount.getBoundingClientRect();
+            const rect = renderer.domElement.getBoundingClientRect();
             mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
             mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
             raycaster.setFromCamera(mouse, camera);
             const intersects = raycaster.intersectObjects(Array.from(soundSourceMeshes.values()));
+            
             if (intersects.length > 0) {
-                const selected = intersects[0].object as THREE.Mesh;
-                selectedObjectForDrag = selected;
-                selectedObjectForScroll = selected; // Link for scrolling
+                event.preventDefault();
+                selectedObject = intersects[0].object as THREE.Mesh;
                 
-                mount.style.cursor = 'grabbing';
                 controls.enabled = false;
+                pointerDownCoords.set(event.clientX, event.clientY);
                 
                 if (is3DModeRef.current) {
                     const cameraDirection = new THREE.Vector3();
                     camera.getWorldDirection(cameraDirection);
-                    dragPlane.setFromNormalAndCoplanarPoint(cameraDirection, selected.position);
+                    dragPlane.setFromNormalAndCoplanarPoint(cameraDirection, selectedObject.position);
                 } else {
                     dragPlane.set(new THREE.Vector3(0, 1, 0), 0);
                 }
 
                 if (raycaster.ray.intersectPlane(dragPlane, intersectionPoint)) {
-                    offset.copy(intersectionPoint).sub(selected.position);
+                    offset.copy(intersectionPoint).sub(selectedObject.position);
                 }
-                
-                scrollTargetDistance = selected.position.length(); // Initialize for scrolling
             }
         };
 
         const onPointerMove = (event: PointerEvent) => {
-            const rect = mount.getBoundingClientRect();
+            const rect = renderer.domElement.getBoundingClientRect();
             mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
             mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
             raycaster.setFromCamera(mouse, camera);
 
-            if (selectedObjectForDrag) {
-                event.preventDefault();
-                if (raycaster.ray.intersectPlane(dragPlane, intersectionPoint)) {
-                    const newPosition = intersectionPoint.clone().sub(offset);
+            if (selectedObject) {
+                // Check if dragging should start
+                if (!isDragging) {
+                    const dx = event.clientX - pointerDownCoords.x;
+                    const dy = event.clientY - pointerDownCoords.y;
+                    if (dx * dx + dy * dy > DRAG_THRESHOLD_SQUARED) {
+                        isDragging = true;
+                        mount.style.cursor = 'grabbing';
+                    }
+                }
 
-                    if (newPosition.length() > 10) {
-                        newPosition.setLength(10);
+                // If dragging, update the object's position
+                if (isDragging) {
+                    event.preventDefault();
+                    if (raycaster.ray.intersectPlane(dragPlane, intersectionPoint)) {
+                        const newPosition = intersectionPoint.clone().sub(offset);
+
+                        if (newPosition.length() > 10) {
+                            newPosition.setLength(10);
+                        }
+                        if (!is3DModeRef.current) {
+                            newPosition.y = 0;
+                        }
+                        
+                        selectedObject.position.copy(newPosition);
+                        onSourceMoveRef.current(selectedObject.userData.id, selectedObject.position);
                     }
-                    if (!is3DModeRef.current) {
-                        newPosition.y = 0;
-                    }
-                    
-                    selectedObjectForDrag.position.copy(newPosition);
-                    scrollTargetDistance = newPosition.length(); // Update scroll target while dragging
-                    onSourceMoveRef.current(selectedObjectForDrag.userData.id, selectedObjectForDrag.position);
                 }
             } else {
+                // Hover logic
                 const intersects = raycaster.intersectObjects(Array.from(soundSourceMeshes.values()));
                 const newHoveredObject = intersects.length > 0 ? (intersects[0].object as THREE.Mesh) : null;
                 if (newHoveredObject !== hoveredObject) {
@@ -209,35 +212,63 @@ const Scene: React.FC<SceneProps> = ({ soundSources, is3DMode, onSourceMove }) =
         };
 
         const onWindowPointerUp = () => {
-            if (selectedObjectForDrag) {
-                selectedObjectForDrag = null;
+            if (selectedObject) {
                 mount.style.cursor = 'grab';
                 controls.enabled = true;
             }
-            selectedObjectForScroll = null;
-            scrollTargetDistance = null;
+            selectedObject = null;
+            isDragging = false;
         };
 
         const onWheel = (event: WheelEvent) => {
-            if (!is3DModeRef.current || !selectedObjectForScroll) return;
+            // Only act if an object is selected.
+            if (!is3DModeRef.current || !selectedObject) return;
             
             event.preventDefault();
 
-            const scrollSensitivity = 0.005;
-            const scrollAmount = event.deltaY * scrollSensitivity;
+            const camera = cameraRef.current;
+            if (!camera) return;
+
+            const scrollSensitivity = 2.5;
+            // Invert deltaY so scrolling down (positive) brings object closer (negative distance change)
+            const scrollAmount = -event.deltaY * 0.001 * scrollSensitivity; 
+
+            // Get the vector from camera to object.
+            const direction = new THREE.Vector3();
+            direction.copy(selectedObject.position).sub(camera.position);
+
+            // Calculate the new distance from the camera.
+            let newDistance = direction.length() + scrollAmount;
+
+            // Clamp the distance to avoid moving behind the camera or too far away.
+            newDistance = THREE.MathUtils.clamp(newDistance, 1, 30); 
+
+            // Set the new position.
+            direction.setLength(newDistance);
+            selectedObject.position.copy(camera.position).add(direction);
             
-            if (scrollTargetDistance === null) {
-                scrollTargetDistance = selectedObjectForScroll.position.length();
+            // Also clamp the position to stay within the main stage sphere.
+            if (selectedObject.position.length() > 10) {
+                selectedObject.position.setLength(10);
+            }
+            
+            // Re-calculate the drag plane for subsequent drags to be correct at the new depth
+            const cameraDirection = new THREE.Vector3();
+            camera.getWorldDirection(cameraDirection);
+            dragPlane.setFromNormalAndCoplanarPoint(cameraDirection, selectedObject.position);
+            if (raycaster.ray.intersectPlane(dragPlane, intersectionPoint)) {
+                offset.copy(intersectionPoint).sub(selectedObject.position);
             }
 
-            scrollTargetDistance -= scrollAmount;
-            scrollTargetDistance = THREE.MathUtils.clamp(scrollTargetDistance, 0.1, 10);
+            // Notify App of the move.
+            onSourceMoveRef.current(selectedObject.userData.id, selectedObject.position);
         };
 
-        mount.addEventListener('pointerdown', onPointerDown);
+
+        renderer.domElement.addEventListener('pointerdown', onPointerDown);
         window.addEventListener('pointermove', onPointerMove);
         window.addEventListener('pointerup', onWindowPointerUp);
-        mount.addEventListener('wheel', onWheel, { passive: false });
+        renderer.domElement.addEventListener('wheel', onWheel, { passive: false });
         
         const handleResize = () => {
              camera.aspect = mount.clientWidth / mount.clientHeight;
@@ -250,10 +281,10 @@ const Scene: React.FC<SceneProps> = ({ soundSources, is3DMode, onSourceMove }) =
         return () => {
             cancelAnimationFrame(animationFrameId);
             window.removeEventListener('resize', handleResize);
-            mount.removeEventListener('pointerdown', onPointerDown);
+            renderer.domElement.removeEventListener('pointerdown', onPointerDown);
             window.removeEventListener('pointermove', onPointerMove);
             window.removeEventListener('pointerup', onWindowPointerUp);
-            mount.removeEventListener('wheel', onWheel);
+            renderer.domElement.removeEventListener('wheel', onWheel);
 
             scene.traverse(object => {
                 if (!(object instanceof THREE.Mesh)) return;

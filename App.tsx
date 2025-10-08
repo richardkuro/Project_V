@@ -7,6 +7,7 @@ import Timeline from './components/Timeline';
 import LoadingIndicator from './components/LoadingIndicator';
 import { bufferToWav } from './utils/audio';
 import ModeToggle from './components/ModeToggle';
+import { AddIcon } from './components/Icons';
 
 const COLORS = [0xff6347, 0x4682b4, 0x32cd32, 0xffd700, 0x6a5acd, 0xda70d6];
 
@@ -16,7 +17,7 @@ const App: React.FC = () => {
     const [isPlaying, setIsPlaying] = useState<boolean>(false);
     const [isLoading, setIsLoading] = useState<boolean>(false);
     const [loadingText, setLoadingText] = useState<string>('Processing Audio...');
-    const [zoomLevel, setZoomLevel] = useState<number>(100);
+    const [zoomLevel, setZoomLevel] = useState<number>(50);
     const [currentTime, setCurrentTime] = useState<number>(0);
     const [globalDuration, setGlobalDuration] = useState<number>(0);
 
@@ -244,7 +245,18 @@ const App: React.FC = () => {
             <ControlsPanel>
                 <TracksList soundSources={soundSources} onDeleteSource={handleDeleteSource} />
             </ControlsPanel>
-            <ModeToggle is3DMode={is3DMode} onModeToggle={setIs3DMode} />
+            
+            <div className="absolute top-0 right-0 p-4 sm:p-6 pointer-events-auto z-20 flex flex-col items-end gap-3">
+                <ModeToggle is3DMode={is3DMode} onModeToggle={setIs3DMode} />
+                <button
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex items-center justify-center h-10 w-10 sm:w-auto sm:px-4 sm:py-2 font-semibold rounded-full sm:rounded-lg transition-all duration-200 shadow-lg bg-cyan-600 hover:bg-cyan-700 text-white border border-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.5)] hover:shadow-[0_0_15px_rgba(34,211,238,0.7)]"
+                    aria-label="Add new audio track"
+                >
+                    <AddIcon />
+                    <span className="ml-2 hidden sm:inline">Add Track</span>
+                </button>
+            </div>
 
             <div className="flex-grow relative">
                 <Scene
@@ -263,7 +275,6 @@ const App: React.FC = () => {
                 onVolumeChange={handleVolumeChange}
                 isPlaying={isPlaying}
                 onPlayPause={isPlaying ? pauseAudio : playAudio}
-                onAddTracks={() => fileInputRef.current?.click()}
                 onExport={handleExport}
                 isAudioLoaded={soundSources.length > 0}
             />

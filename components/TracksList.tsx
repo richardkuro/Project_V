@@ -13,7 +13,7 @@ const TracksList: React.FC<TracksListProps> = ({ soundSources, onDeleteSource })
     }
 
     return (
-        <div className="bg-slate-900/70 backdrop-blur-md rounded-lg p-2 border border-slate-700 flex flex-col gap-1 max-w-xs">
+        <div className="bg-slate-900/70 backdrop-blur-md rounded-lg p-2 border border-slate-700 flex flex-col gap-1 max-w-[240px] sm:max-w-xs">
             {soundSources.map(source => (
                 <div key={source.id} className="bg-slate-800/80 p-1.5 rounded-md flex items-center gap-2">
                     <div 
