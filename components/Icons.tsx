@@ -54,3 +54,16 @@ export const CloseIcon: React.FC = () => (
         <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
     </svg>
 );
+
+export const ScissorsIcon: React.FC = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+      <path d="M5.434 5.434a1 1 0 011.414 0L10 8.586l3.152-3.152a1 1 0 111.414 1.414L11.414 10l3.152 3.152a1 1 0 11-1.414 1.414L10 11.414l-3.152 3.152a1 1 0 11-1.414-1.414L8.586 10 5.434 6.848a1 1 0 010-1.414z" />
+      <path d="M8 5a2 2 0 100-4 2 2 0 000 4zM2 5a2 2 0 100-4 2 2 0 000 4z" />
+    </svg>
+);
+
+export const KeyboardIcon: React.FC = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M20 5H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm-9 3h2v2h-2V8zm0 3h2v2h-2v-2zM8 8h2v2H8V8zm0 3h2v2H8v-2zm-1 2H5v-2h2v2zm0-3H5V8h2v2zm9 7H8v-2h8v2zm0-4h-2v-2h2v2zm0-3h-2V8h2v2zm3 3h-2v-2h2v2zm0-3h-2V8h2v2z"/>
+    </svg>
+);

@@ -1,7 +1,16 @@
+export function drawWaveform(
+    channelData: Float32Array,
+    sampleRate: number,
+    canvas: HTMLCanvasElement, 
+    color: string,
+    offsetSeconds: number,
+    durationSeconds: number
+) {
+    if (!canvas || !channelData) return;
+    
+    const startIndex = Math.floor(offsetSeconds * sampleRate);
+    const frameCount = Math.floor(durationSeconds * sampleRate);
 
-export function drawWaveform(buffer: AudioBuffer, canvas: HTMLCanvasElement, color: string) {
-    if (!canvas) return;
-    const data = buffer.getChannelData(0);
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
@@ -12,10 +21,17 @@ export function drawWaveform(buffer: AudioBuffer, canvas: HTMLCanvasElement, col
     
     const width = canvas.offsetWidth;
     const height = canvas.offsetHeight;
-    const step = Math.ceil(data.length / width);
+    const step = Math.ceil(frameCount / width);
     const amp = height / 2;
     
     ctx.clearRect(0, 0, width, height);
+    
+    ctx.beginPath();
+    ctx.moveTo(0, amp);
+    ctx.lineTo(width, amp);
+    ctx.strokeStyle = "rgba(100, 116, 139, 0.5)";
+    ctx.stroke();
+
     ctx.strokeStyle = color;
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -23,8 +39,9 @@ export function drawWaveform(buffer: AudioBuffer, canvas: HTMLCanvasElement, col
     for (let i = 0; i < width; i++) {
         let min = 1.0;
         let max = -1.0;
+        const frameStartIndex = startIndex + (i * step);
         for (let j = 0; j < step; j++) {
-            const datum = data[(i * step) + j];
+            const datum = channelData[frameStartIndex + j];
             if (datum < min) min = datum;
             if (datum > max) max = datum;
         }

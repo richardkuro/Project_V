@@ -1,237 +1,231 @@
-import React, { useRef, useEffect, useCallback, useState, memo, useLayoutEffect } from 'react';
-import { SoundSource } from '../types';
-import { drawWaveform } from '../utils/audio';
-import { ZoomInIcon, ZoomOutIcon, ChevronUpIcon, ChevronDownIcon, PlayIcon, PauseIcon, ExportIcon } from './Icons';
+import React, { useRef, useCallback, useEffect, Fragment } from 'react';
+import { Track, AudioClip, SoundSource } from '../types';
 import { formatTime } from '../utils/time';
-
-interface WaveformCanvasProps {
-    buffer: AudioBuffer;
-    color: string;
-}
-
-const WaveformCanvas: React.FC<WaveformCanvasProps> = memo(({ buffer, color }) => {
-    const canvasRef = useRef<HTMLCanvasElement>(null);
-
-    useEffect(() => {
-        const canvas = canvasRef.current;
-        if (canvas && buffer) {
-            drawWaveform(buffer, canvas, color);
-        }
-    }, [buffer, color]);
-
-    return <canvas ref={canvasRef} className="waveform-canvas flex-grow w-full h-[48px] bg-slate-950/50 rounded-md"></canvas>;
-});
-
-const calculateTicks = (duration: number, zoomLevel: number, minSpacingPx: number) => {
-    if (duration <= 0 || zoomLevel <= 0) return [];
-
-    const pixelsPerSecond = zoomLevel;
-    const minTimeInterval = minSpacingPx / pixelsPerSecond;
-
-    const niceIntervals = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
-    
-    const tickInterval = niceIntervals.find(interval => interval >= minTimeInterval) || niceIntervals[niceIntervals.length - 1];
-
-    const ticks = [];
-    const tickCount = Math.floor(duration / tickInterval);
-
-    for (let i = 0; i <= tickCount; i++) {
-        const time = i * tickInterval;
-        ticks.push({
-            time: time,
-            position: time * zoomLevel,
-        });
-    }
-    
-    return ticks;
-};
+import { PlayIcon, PauseIcon, ExportIcon, ZoomInIcon, ZoomOutIcon } from './Icons';
+import AudioClipView from './AudioClipView';
 
 interface TimelineProps {
+    tracks: Track[];
     soundSources: SoundSource[];
     currentTime: number;
     duration: number;
     onSeek: (time: number) => void;
     zoomLevel: number;
     onZoomChange: (level: number) => void;
-    onVolumeChange: (id: string, volume: number) => void;
+    onUpdateClip: (clip: AudioClip) => void;
+    onUpdateTrack: (trackId: string, updates: Partial<Track>) => void;
+    height: number;
+    onHeightChange: (height: number) => void;
     isPlaying: boolean;
     onPlayPause: () => void;
     onExport: () => void;
     isAudioLoaded: boolean;
+    selectedClipId: string | null;
+    onSelectClip: (id: string | null) => void;
+    onSliceClip: () => void;
 }
 
-const TRACK_INFO_PANEL_WIDTH_PX = 128; 
-const TRACK_ROW_GAP_PX = 8; 
-const WAVEFORM_START_OFFSET_PX = TRACK_INFO_PANEL_WIDTH_PX + TRACK_ROW_GAP_PX;
-
 const Timeline: React.FC<TimelineProps> = ({
-    soundSources, currentTime, duration, onSeek, zoomLevel, onZoomChange, onVolumeChange,
-    isPlaying, onPlayPause, onExport, isAudioLoaded
+    tracks,
+    soundSources,
+    currentTime,
+    duration,
+    onSeek,
+    zoomLevel,
+    onZoomChange,
+    onUpdateClip,
+    onUpdateTrack,
+    height,
+    onHeightChange,
+    isPlaying,
+    onPlayPause,
+    onExport,
+    isAudioLoaded,
+    selectedClipId,
+    onSelectClip,
 }) => {
-    const timelineWrapperRef = useRef<HTMLDivElement>(null);
+    const timelineRulerRef = useRef<HTMLDivElement>(null);
     const timelineContainerRef = useRef<HTMLDivElement>(null);
-    const playheadRef = useRef<HTMLDivElement>(null);
-    const [isSeeking, setIsSeeking] = useState(false);
-    const [isMinimized, setIsMinimized] = useState(false);
 
-    const timelineWidth = duration * zoomLevel;
-    const ticks = calculateTicks(duration, zoomLevel, 80);
+    const handleSeek = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+        if (!timelineRulerRef.current) return;
+        const rect = timelineRulerRef.current.getBoundingClientRect();
+        const clickX = e.clientX - rect.left;
+        const newTime = clickX / zoomLevel;
+        onSeek(newTime);
+    }, [onSeek, zoomLevel]);
 
-    const handleSeek = useCallback((event: React.MouseEvent<HTMLDivElement> | React.PointerEvent<HTMLDivElement> | PointerEvent) => {
-        if (!timelineContainerRef.current || duration <= 0) return;
-        
-        const containerBounds = timelineContainerRef.current.getBoundingClientRect();
-        const scrollLeft = timelineContainerRef.current.scrollLeft;
-        const clickXInView = event.clientX - containerBounds.left;
-        const clickXAbsolute = clickXInView + scrollLeft;
-
-        const waveformAreaStart = WAVEFORM_START_OFFSET_PX;
-        if (clickXAbsolute < waveformAreaStart) return;
-
-        const clickInWaveform = clickXAbsolute - waveformAreaStart;
-        const newTime = (clickInWaveform / timelineWidth) * duration;
-        onSeek(Math.max(0, Math.min(newTime, duration)));
-
-    }, [duration, onSeek, timelineWidth]);
-
-    const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-        if (e.pointerType === 'mouse' && e.button !== 0) return;
-        const targetElement = e.target as HTMLElement;
-        if (!targetElement.closest('.waveform-container') && !targetElement.closest('.timeline-ruler')) return;
-        setIsSeeking(true);
-        handleSeek(e);
-        e.currentTarget.setPointerCapture(e.pointerId);
-    };
-    
-    const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-        if (isSeeking) handleSeek(e);
-    };
-    
-    const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-        setIsSeeking(false);
-        e.currentTarget.releasePointerCapture(e.pointerId);
-    };
-
-    useLayoutEffect(() => {
-        if (!isPlaying || !timelineContainerRef.current || !playheadRef.current || duration <= 0) return;
-
-        const container = timelineContainerRef.current;
-        const viewWidth = container.clientWidth;
-        const halfViewWidth = viewWidth / 2;
-        
-        const currentTimePosition = WAVEFORM_START_OFFSET_PX + (currentTime * zoomLevel);
-        const targetScrollLeft = currentTimePosition - halfViewWidth;
-
-        container.scrollLeft = Math.max(0, targetScrollLeft);
-        playheadRef.current.style.left = `${Math.min(currentTimePosition, halfViewWidth)}px`;
-
-    }, [currentTime, isPlaying, duration, zoomLevel]);
-    
-    useLayoutEffect(() => {
-        if (isPlaying || !timelineContainerRef.current || !playheadRef.current || duration <= 0) return;
-
-        const container = timelineContainerRef.current;
-        const viewWidth = container.clientWidth;
-        
-        const currentTimePosition = WAVEFORM_START_OFFSET_PX + (currentTime * zoomLevel);
-
-        if(currentTimePosition < container.scrollLeft || currentTimePosition > container.scrollLeft + viewWidth) {
-             container.scrollLeft = currentTimePosition - viewWidth / 2;
+    const renderTimeMarkers = () => {
+        if (!duration) return null;
+        const markers = [];
+        const timelineWidth = duration * zoomLevel;
+        const interval = zoomLevel > 100 ? 1 : zoomLevel > 50 ? 2 : zoomLevel > 20 ? 5 : 10;
+        const numMarkers = Math.floor(duration / interval);
+        for (let i = 0; i <= numMarkers; i++) {
+            const time = i * interval;
+            const position = time * zoomLevel;
+            if (position > timelineWidth + 50) break;
+            markers.push(
+                <div key={time} className="absolute top-0 text-slate-500 text-[10px]" style={{ left: `${position}px` }}>
+                    <div className="h-2 w-px bg-slate-600"></div>
+                    {formatTime(time).slice(0, 5)}
+                </div>
+            );
         }
-        playheadRef.current.style.left = `${currentTimePosition - container.scrollLeft}px`;
-    }, [currentTime, isPlaying, duration, zoomLevel]);
+        return markers;
+    };
+    
+    useEffect(() => {
+        if (isPlaying && timelineContainerRef.current) {
+            const container = timelineContainerRef.current;
+            const playheadPosition = currentTime * zoomLevel;
+            const containerWidth = container.offsetWidth;
+            
+            container.scrollTo({
+                left: playheadPosition - containerWidth / 2,
+                behavior: 'auto',
+            });
+        }
+    }, [currentTime, isPlaying, zoomLevel]);
+
+    const handleResizePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+        e.preventDefault();
+        const startY = e.clientY;
+        const startHeight = height;
+
+        const handlePointerMove = (moveEvent: PointerEvent) => {
+            const dy = startY - moveEvent.clientY;
+            const newHeight = Math.max(120, Math.min(startHeight + dy, window.innerHeight - 100));
+            onHeightChange(newHeight);
+        };
+
+        const handlePointerUp = () => {
+            window.removeEventListener('pointermove', handlePointerMove);
+            window.removeEventListener('pointerup', handlePointerUp);
+            document.body.style.cursor = 'default';
+        };
+        
+        document.body.style.cursor = 'row-resize';
+        window.addEventListener('pointermove', handlePointerMove);
+        window.addEventListener('pointerup', handlePointerUp);
+    };
+
+    const handleTrackResizePointerDown = (e: React.PointerEvent<HTMLDivElement>, trackId: string, originalHeight: number) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const startY = e.clientY;
+        
+        const handlePointerMove = (moveEvent: PointerEvent) => {
+            const dy = moveEvent.clientY - startY;
+            const newHeight = Math.max(40, originalHeight + dy);
+            onUpdateTrack(trackId, { height: newHeight });
+        };
+        
+        const handlePointerUp = () => {
+            window.removeEventListener('pointermove', handlePointerMove);
+            window.removeEventListener('pointerup', handlePointerUp);
+             document.body.style.cursor = 'default';
+        };
+
+        document.body.style.cursor = 'row-resize';
+        window.addEventListener('pointermove', handlePointerMove);
+        window.addEventListener('pointerup', handlePointerUp);
+    };
 
 
     return (
-        <div className="flex-shrink-0 flex flex-col">
-            <div className="relative">
-                <div 
-                    ref={timelineContainerRef} 
-                    className={`w-full bg-slate-900/80 backdrop-blur-md border-t border-slate-700 overflow-x-auto overflow-y-auto transition-all duration-300 ease-in-out ${isMinimized ? 'max-h-0 !p-0 !border-t-0 opacity-0' : 'max-h-[40vh] p-2 opacity-100'}`}
-                >
-                    <div 
-                        ref={timelineWrapperRef} 
-                        className="relative cursor-pointer" 
-                        style={{ width: `${timelineWidth + WAVEFORM_START_OFFSET_PX}px` }}
-                        onPointerDown={handlePointerDown}
-                        onPointerMove={handlePointerMove}
-                        onPointerUp={handlePointerUp}
-                    >
-                        {duration > 0 && (
-                            <div className="timeline-ruler relative h-6 mb-2" style={{ 
-                                marginLeft: `${WAVEFORM_START_OFFSET_PX}px`, 
-                                width: `${timelineWidth}px`
-                            }}>
-                                {ticks.map(({ time, position }) => (
-                                    <div key={time} className="absolute top-0 h-full" style={{ left: `${position}px` }}>
-                                        <div className="w-px h-2 bg-slate-500"></div>
-                                        <span className="absolute -translate-x-1/2 text-[10px] text-slate-400 mt-1 select-none">
-                                            {formatTime(time)}
-                                        </span>
-                                    </div>
-                                ))}
-                            </div>
-                        )}
-                        <div className="space-y-2">
-                            {soundSources.map(source => (
-                                <div key={source.id} className="flex items-center gap-2">
-                                    <div className="w-32 p-2 bg-slate-800 rounded-md flex-shrink-0 pointer-events-auto">
-                                        <div className="text-xs font-semibold truncate text-slate-200">{source.name}</div>
-                                        <input 
-                                            type="range" min="0" max="1.5" step="0.01" defaultValue="1"
-                                            className="w-full h-2 mt-1 bg-slate-600 rounded-lg appearance-none cursor-pointer"
-                                            onChange={(e) => onVolumeChange(source.id, parseFloat(e.target.value))}
-                                        />
-                                    </div>
-                                    <div className="waveform-container relative w-full h-[48px]" style={{width: `${timelineWidth}px`}}>
-                                        <WaveformCanvas buffer={source.buffer} color={source.color} />
-                                    </div>
-                                </div>
-                            ))}
+        <div className="relative flex-shrink-0 z-30" style={{ height: `${height}px` }}>
+            <div
+                onPointerDown={handleResizePointerDown}
+                className="absolute top-0 left-0 right-0 h-1.5 cursor-row-resize bg-slate-800 hover:bg-cyan-500/50 transition-colors z-40"
+            />
+            <div className="h-full pt-1.5 bg-slate-950/80 backdrop-blur-lg border-t border-slate-700 flex flex-col">
+                {/* Controls Header */}
+                <div className="flex-shrink-0 h-12 bg-slate-900/50 flex items-center justify-between px-4 border-b border-slate-800">
+                    <div className="flex items-center gap-4">
+                        <button
+                            onClick={onPlayPause}
+                            disabled={!isAudioLoaded}
+                            className="p-2 text-cyan-400 rounded-full disabled:text-slate-600 enabled:hover:bg-slate-700 transition-colors"
+                            aria-label={isPlaying ? 'Pause' : 'Play'}
+                        >
+                            {isPlaying ? <PauseIcon /> : <PlayIcon />}
+                        </button>
+                        <div className="font-mono text-lg text-glow text-cyan-400 w-[80px]">
+                            {formatTime(currentTime)}
                         </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-1">
+                            <button onClick={() => onZoomChange(Math.max(10, zoomLevel - 10))} className="p-1.5 text-slate-400 hover:text-white rounded-md hover:bg-slate-700 transition-colors"><ZoomOutIcon /></button>
+                            <input
+                                type="range"
+                                min="10"
+                                max="200"
+                                value={zoomLevel}
+                                onChange={(e) => onZoomChange(Number(e.target.value))}
+                                className="w-24 h-1 bg-slate-700 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-cyan-400 [&::-webkit-slider-thumb]:rounded-full"
+                            />
+                            <button onClick={() => onZoomChange(Math.min(200, zoomLevel + 10))} className="p-1.5 text-slate-400 hover:text-white rounded-md hover:bg-slate-700 transition-colors"><ZoomInIcon /></button>
+                        </div>
+                        <button
+                            onClick={onExport}
+                            disabled={!isAudioLoaded}
+                            className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 border border-slate-700 rounded-md text-sm font-semibold text-slate-300 disabled:opacity-50 hover:bg-slate-700 hover:border-slate-600 transition-colors"
+                        >
+                            <ExportIcon />
+                            Export
+                        </button>
                     </div>
                 </div>
 
-                {duration > 0 && !isMinimized && (
-                    <div 
-                        ref={playheadRef}
-                        className="absolute top-0 w-0.5 h-full bg-cyan-400 pointer-events-none z-10"
-                        style={{ 
-                            boxShadow: '0 0 8px #22d3ee',
-                            transform: 'translateX(-50%)' 
-                        }}
-                    ></div>
-                )}
-            </div>
+                {/* Timeline Tracks */}
+                <div 
+                    ref={timelineContainerRef}
+                    className="flex-grow overflow-auto relative"
+                    onClick={() => onSelectClip(null)}
+                >
+                    <div className="relative h-full" style={{ width: `${Math.max(duration * zoomLevel, 1000)}px`}}>
+                        <div ref={timelineRulerRef} className="h-6 sticky top-0 bg-slate-900 z-20" onMouseDown={handleSeek}>
+                            {renderTimeMarkers()}
+                        </div>
 
-            <div className="bg-slate-950 p-2 flex items-center justify-between relative border-t border-slate-700 h-14">
-                {/* Left section: Playback controls and time */}
-                <div className="flex items-center gap-2 sm:gap-4">
-                    <button onClick={onPlayPause} disabled={!isAudioLoaded} className="flex items-center justify-center p-2 w-10 h-10 rounded-full transition-all duration-200 disabled:text-slate-600 disabled:bg-slate-800 text-white bg-emerald-600 hover:bg-emerald-700 disabled:shadow-none shadow-[0_0_10px_rgba(16,185,129,0.5)]">
-                        {isPlaying ? <PauseIcon /> : <PlayIcon />}
-                    </button>
-                    <div className="font-mono text-base sm:text-lg text-cyan-400">{formatTime(currentTime)}</div>
-                </div>
-                
-                {/* Center section: Zoom controls */}
-                <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 flex items-center gap-1 sm:gap-3 text-slate-400">
-                    <ZoomOutIcon />
-                    <input 
-                        type="range" id="zoom-slider" min="5" max="100" value={zoomLevel} 
-                        onChange={(e) => onZoomChange(parseInt(e.target.value, 10))}
-                        className="w-24 sm:w-40 h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
-                    />
-                    <ZoomInIcon />
-                </div>
+                        <div
+                            className="absolute top-0 bottom-0 w-0.5 bg-cyan-400 z-30 pointer-events-none"
+                            style={{ left: `${currentTime * zoomLevel}px`, boxShadow: '0 0 8px #22d3ee' }}
+                        />
 
-                {/* Right section: Timeline actions */}
-                <div className="flex items-center gap-1 sm:gap-3">
-                    <button onClick={() => setIsMinimized(!isMinimized)} className="p-1 text-slate-400 hover:text-white transition-colors" aria-label={isMinimized ? "Expand timeline" : "Collapse timeline"}>
-                        {isMinimized ? <ChevronUpIcon /> : <ChevronDownIcon />}
-                    </button>
-                    <button onClick={onExport} disabled={!isAudioLoaded} className="flex items-center justify-center p-2 w-10 h-10 rounded-full transition-all duration-200 disabled:text-slate-600 disabled:bg-slate-800 text-white bg-violet-600 hover:bg-violet-700 disabled:shadow-none shadow-[0_0_10px_rgba(139,92,246,0.5)]">
-                        <ExportIcon />
-                    </button>
+                        <div className="relative pt-1">
+                             {tracks.map((track, index) => (
+                                <Fragment key={track.id}>
+                                    <div style={{ height: `${track.height}px` }} className="relative">
+                                        {track.clips.map(clip => {
+                                            const sourceBuffer = soundSources.find(s => s.id === clip.sourceId)?.buffer;
+                                            if (!sourceBuffer) return null;
+                                            return (
+                                                <AudioClipView
+                                                    key={clip.id}
+                                                    clip={clip}
+                                                    sourceBuffer={sourceBuffer}
+                                                    trackColor={track.color}
+                                                    zoomLevel={zoomLevel}
+                                                    onUpdate={onUpdateClip}
+                                                    isSelected={selectedClipId === clip.id}
+                                                    onSelect={() => onSelectClip(clip.id)}
+                                                />
+                                            );
+                                        })}
+                                    </div>
+                                    {index < tracks.length - 1 && (
+                                        <div
+                                            className="w-full h-1.5 cursor-row-resize bg-slate-800 hover:bg-cyan-500/50 transition-colors"
+                                            onPointerDown={(e) => handleTrackResizePointerDown(e, track.id, track.height)}
+                                        />
+                                    )}
+                                </Fragment>
+                            ))}
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

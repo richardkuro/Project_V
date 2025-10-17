@@ -2,15 +2,15 @@ import React, { useRef, useEffect } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
-import { SoundSource } from '../types';
+import { Track } from '../types';
 
 interface SceneProps {
-    soundSources: SoundSource[];
+    tracks: Track[];
     is3DMode: boolean;
-    onSourceMove: (id: string, position: { x: number, y: number, z: number }) => void;
+    onTrackMove: (id: string, position: { x: number, y: number, z: number }) => void;
 }
 
-const Scene: React.FC<SceneProps> = ({ soundSources, is3DMode, onSourceMove }) => {
+const Scene: React.FC<SceneProps> = ({ tracks, is3DMode, onTrackMove }) => {
     const mountRef = useRef<HTMLDivElement>(null);
 
     // Refs for Three.js objects that persist across renders
@@ -18,14 +18,14 @@ const Scene: React.FC<SceneProps> = ({ soundSources, is3DMode, onSourceMove }) =
     const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
     const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
     const controlsRef = useRef<OrbitControls | null>(null);
-    const soundSourceMeshes = useRef(new Map<string, THREE.Mesh>()).current;
+    const trackMeshes = useRef(new Map<string, THREE.Mesh>()).current;
 
     // Use refs for props/state used in event listeners to avoid stale closures
     const is3DModeRef = useRef(is3DMode);
     useEffect(() => { is3DModeRef.current = is3DMode; }, [is3DMode]);
     
-    const onSourceMoveRef = useRef(onSourceMove);
-    useEffect(() => { onSourceMoveRef.current = onSourceMove; }, [onSourceMove]);
+    const onTrackMoveRef = useRef(onTrackMove);
+    useEffect(() => { onTrackMoveRef.current = onTrackMove; }, [onTrackMove]);
 
     // Effect for initializing the scene, camera, renderer, etc. Runs only ONCE.
     useEffect(() => {
@@ -137,7 +137,7 @@ const Scene: React.FC<SceneProps> = ({ soundSources, is3DMode, onSourceMove }) =
             mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
             mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
             raycaster.setFromCamera(mouse, camera);
-            const intersects = raycaster.intersectObjects(Array.from(soundSourceMeshes.values()));
+            const intersects = raycaster.intersectObjects(Array.from(trackMeshes.values()));
             
             if (intersects.length > 0) {
                 event.preventDefault();
@@ -191,12 +191,12 @@ const Scene: React.FC<SceneProps> = ({ soundSources, is3DMode, onSourceMove }) =
                         }
                         
                         selectedObject.position.copy(newPosition);
-                        onSourceMoveRef.current(selectedObject.userData.id, selectedObject.position);
+                        onTrackMoveRef.current(selectedObject.userData.id, selectedObject.position);
                     }
                 }
             } else {
                 // Hover logic
-                const intersects = raycaster.intersectObjects(Array.from(soundSourceMeshes.values()));
+                const intersects = raycaster.intersectObjects(Array.from(trackMeshes.values()));
                 const newHoveredObject = intersects.length > 0 ? (intersects[0].object as THREE.Mesh) : null;
                 if (newHoveredObject !== hoveredObject) {
                     if (hoverTimeout) clearTimeout(hoverTimeout);
@@ -261,7 +261,7 @@ const Scene: React.FC<SceneProps> = ({ soundSources, is3DMode, onSourceMove }) =
             }
 
             // Notify App of the move.
-            onSourceMoveRef.current(selectedObject.userData.id, selectedObject.position);
+            onTrackMoveRef.current(selectedObject.userData.id, selectedObject.position);
         };
 
 
@@ -305,45 +305,53 @@ const Scene: React.FC<SceneProps> = ({ soundSources, is3DMode, onSourceMove }) =
         };
     }, []); // Empty dependency array ensures this runs only once.
 
-    // Effect for handling sound source mesh updates
+    // Effect for handling track mesh updates
     useEffect(() => {
         if (!sceneRef.current) return;
         const scene = sceneRef.current;
-        const currentIds = new Set(soundSources.map(s => s.id));
+        const currentIds = new Set(tracks.map(t => t.id));
         
-        soundSourceMeshes.forEach((mesh, id) => {
+        trackMeshes.forEach((mesh, id) => {
             if (!currentIds.has(id)) {
                 if (mesh.userData.label) mesh.remove(mesh.userData.label);
                 scene.remove(mesh);
-                soundSourceMeshes.delete(id);
+                trackMeshes.delete(id);
             }
         });
 
-        soundSources.forEach(source => {
-            if (!soundSourceMeshes.has(source.id)) {
+        tracks.forEach(track => {
+            if (!trackMeshes.has(track.id)) {
                 const mesh = new THREE.Mesh(
                     new THREE.SphereGeometry(0.5, 32, 16),
-                    new THREE.MeshStandardMaterial({ color: source.color, emissive: source.color, emissiveIntensity: 0.5 })
+                    new THREE.MeshStandardMaterial({ color: track.color, emissive: track.color, emissiveIntensity: 0.5 })
                 );
                 mesh.position.setFromSphericalCoords(10, Math.random() * Math.PI, Math.random() * 2 * Math.PI);
                 if (!is3DMode) mesh.position.y = 0;
                 
                 const labelDiv = document.createElement('div');
                 labelDiv.className = 'text-cyan-200 p-1 px-2 bg-slate-950 bg-opacity-70 rounded text-xs pointer-events-none transform -translate-x-1/2 translate-y-5 text-glow';
-                labelDiv.textContent = source.name.length > 15 ? `${source.name.substring(0, 12)}...` : source.name;
+                labelDiv.textContent = track.name.length > 15 ? `${track.name.substring(0, 12)}...` : track.name;
                 const label = new CSS2DObject(labelDiv);
                 label.visible = false;
                 mesh.add(label);
                 
-                mesh.userData.id = source.id;
+                mesh.userData.id = track.id;
                 mesh.userData.label = label;
-                onSourceMove(source.id, mesh.position);
+                onTrackMove(track.id, mesh.position);
                 
                 scene.add(mesh);
-                soundSourceMeshes.set(source.id, mesh);
+                trackMeshes.set(track.id, mesh);
+            } else {
+                // Update color if it changed
+                const mesh = trackMeshes.get(track.id)!;
+                const material = mesh.material as THREE.MeshStandardMaterial;
+                if (material.color.getHexString() !== track.color.substring(1)) {
+                    material.color.set(track.color);
+                    material.emissive.set(track.color);
+                }
             }
         });
-    }, [soundSources, is3DMode, onSourceMove, soundSourceMeshes]);
+    }, [tracks, is3DMode, onTrackMove, trackMeshes]);
 
     // Effect for toggling 2D/3D mode
     useEffect(() => {
@@ -374,19 +382,19 @@ const Scene: React.FC<SceneProps> = ({ soundSources, is3DMode, onSourceMove }) =
                 controls.enableRotate = false;
                 camera.position.set(0, 20, 0.01);
                 controls.target.set(0, 0, 0);
-                soundSourceMeshes.forEach(mesh => {
+                trackMeshes.forEach(mesh => {
                     if (mesh.position.y !== 0) {
                         const newPosition = mesh.position.clone();
                         newPosition.y = 0;
                         if (newPosition.length() > 10) newPosition.normalize().multiplyScalar(10);
                         mesh.position.copy(newPosition);
-                        onSourceMove(mesh.userData.id, mesh.position);
+                        onTrackMove(mesh.userData.id, mesh.position);
                     }
                 });
             }
             controls.update();
         }
-    }, [is3DMode, onSourceMove, soundSourceMeshes]);
+    }, [is3DMode, onTrackMove, trackMeshes]);
 
     return <div ref={mountRef} className="absolute top-0 left-0 w-full h-full cursor-grab active:cursor-grabbing"></div>;
 };
